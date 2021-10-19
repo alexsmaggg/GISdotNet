@@ -12,11 +12,8 @@ using GISdotNet.Core.Channels;
 using GISdotNet.Core.Packets;
 using GISdotNet.Core.Net;
 
-
-
 namespace GISdotNet.Map
 {
- 
     public partial class frmMain : Form
     {
         double GeoX;
@@ -33,7 +30,6 @@ namespace GISdotNet.Map
 
         const int IdSemCode = 10;
         const int ColorSemCode = 31002;
-
 
         int FObjIncode;  // внутренний код объекта карты которым отображаем наш движущийся
         int RlsObjIncode;
@@ -256,8 +252,7 @@ namespace GISdotNet.Map
             {
                 RlsObj.Semantic.AddWithValueAsInteger(ColorSemCode, (int)RlsColor.blue);
             }
-            
-          
+                      
             MapPoint.SetPoint(PlaneX + deltaX, PlaneY + deltaY);
             RlsObj.Metric.Append(0, MapPoint.C_CONTAINER); 
             RlsObj.Commit();
@@ -302,7 +297,6 @@ namespace GISdotNet.Map
                 MessageBox.Show(ex.Message);
             }
 
-
             RlsZoneObj.Commit();
             RlsZoneObj.Repaint();
         }
@@ -324,10 +318,8 @@ namespace GISdotNet.Map
             PaintRlsZoneLine(Azmth.VeichleNumber, X, Y, Azmth.AzimuthValue,   0.53);
             PaintRlsZoneLine(Azmth.VeichleNumber, X, Y, Azmth.AzimuthValue, - 0.53);
 
-
             axMapScreen.Repaint();
         }
-
 
         public void SetSearchContextForRlsObj(int id)
         {
@@ -409,24 +401,6 @@ namespace GISdotNet.Map
             slMap2.Text = "  X=  " + e.x.ToString();
             slMap3.Text = "  Y= " + e.y.ToString();
 
-        }
-
-        /*private void toolStripButton1_Click(object sender, EventArgs e)
-        {
-            FObjIncode = mvRsc.ObjectIncodeByKey_get(RlsKeyCode);
-            RlsObj.ObjHandle = 0;          
-            MapFind.Active = false;
-            MapFind.cMapSelect.AddSemantic(10, "9", axGisToolKit.TxSemanticCondition.SC_EQUAL);
-            MapFind.cMapSelect.Layers[-1] = false;
-            MapFind.cMapSelect.Layers[1] = true;  //P0000000016           
-            MapFind.cMapSelect.InCode[-1] = false;
-            MapFind.cMapSelect.InCode[FObjIncode] = true;
-            MapFind.cMapSelect.MapSites[0] = false;
-            MapFind.cMapSelect.MapSites[1] = true;
-            MapFind.Active = true;
-            RlsObj.Style = axGisToolKit.TxObjectStyle.OS_SELECT;
-            Console.WriteLine(MapFind.Eof);
-            Console.WriteLine(RlsObj.ObjHandle);
-        }*/
+        }       
     }
 }
