@@ -3,14 +3,18 @@ using System.IO;
 using System.Collections;
 using System.Collections.Generic;
 using System.Windows.Forms;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Threading.Channels;
 using System.Net.Sockets;
 using System.Net;
+using System.Data;
 using System.Linq;
 using GISdotNet.Core.Channels;
 using GISdotNet.Core.Packets;
 using GISdotNet.Core.Net;
+
+using FastMember;
 
 namespace GISdotNet.Map
 {
@@ -27,13 +31,17 @@ namespace GISdotNet.Map
         string VectorKeyCode  = "";
         string RlsKeyCode     = "";
         string RlsZoneKeyCode = "";
+        string TextKeyCode    = "";
 
-        const int IdSemCode = 10;
+        const int IdSemCode    = 10;
+        const int SignSemCode  = 9;
+        const int SignSemCodeLeft = 11;
         const int ColorSemCode = 31002;
 
         int FObjIncode;  // внутренний код объекта карты которым отображаем наш движущийся
         int RlsObjIncode;
         int ZoneLineObjIncode;
+        int TextObjIncode;
         public const string RSCPath = "main.rsc";
         public axGisToolKit.TxCreateSite CreateSite;
 
@@ -41,6 +49,11 @@ namespace GISdotNet.Map
         MapWork<byte[]>  work;
         Producer<byte[]> DataProducer; 
         Consumer<byte[]> DataConsumer;
+
+        DataTable DTable;
+        BindingSource SBind;
+        SynchronizationContext context;
+
 
         public enum RlsColor: uint
         {
@@ -52,7 +65,16 @@ namespace GISdotNet.Map
 
         MapApi.DOUBLEPOINT center = new MapApi.DOUBLEPOINT();
         MapApi.DOUBLEPOINT point1 = new MapApi.DOUBLEPOINT();
-        
+
+        public class ObjectReaderType
+        {
+            public int NTarget { get; set; }
+            public int R { get; set; }
+            public int A { get; set; }
+            public int H { get; set; }
+            public int V { get; set; }
+        }
+
         public frmMain()
         {
             InitializeComponent();
@@ -66,10 +88,12 @@ namespace GISdotNet.Map
             RlsObj.cMapView = axMapScreen.C_CONTAINER;
             RlsZoneObj.cMapView = axMapScreen.C_CONTAINER;
             SearchableObj.cMapView = axMapScreen.C_CONTAINER;
+            TextObj.cMapView = axMapScreen.C_CONTAINER;
             MapFind.cMapView = axMapScreen.C_CONTAINER;
             MapFind.cMapObj = SearchableObj.C_CONTAINER;
 
             axMapScreen.MapContrast = -4;
+            axMapScreen.ViewType = axGisToolKit.TxMapViewType.VT_PRINT;
 
             //GeoX = 0.534796009;
             //GeoY = 0.480257839;
@@ -79,6 +103,7 @@ namespace GISdotNet.Map
             VectorKeyCode = "L0000000025";
             RlsKeyCode = "P0000000016";
             RlsZoneKeyCode = "L0000000018";
+            TextKeyCode = "T0000000026";
             TrainerCPXCoord = -1;
             TrainerCPYCoord = -1;
 
@@ -92,7 +117,7 @@ namespace GISdotNet.Map
             FObjIncode = mvRsc.ObjectIncodeByKey_get(ObjKeyName);
             RlsObjIncode = mvRsc.ObjectIncodeByKey_get(RlsKeyCode);
             ZoneLineObjIncode = mvRsc.ObjectIncodeByKey_get(RlsZoneKeyCode);
-
+            TextObjIncode = mvRsc.ObjectIncodeByKey_get(TextKeyCode);
 
             MobilObj.CreateObjectByInCode(1, (int)axGisToolKit.TxMetricType.IDDOUBLE2, FObjIncode);
             MobilObj.Metric.Append(0, MapPoint.C_CONTAINER); // первую точку создаем любую           
@@ -102,6 +127,10 @@ namespace GISdotNet.Map
             VectorObj.Metric.Append(0, MapPoint.C_CONTAINER); // создать первую точку
             VectorObj.Metric.Append(0, MapPoint.C_CONTAINER); // создать вторую точку 
 
+           TextObj.CreateObjectByInCode(1, (int)axGisToolKit.TxMetricType.IDDOUBLE2, TextObjIncode);
+           TextObj.Metric.Append(0, MapPoint.C_CONTAINER); // создать первую точку
+           TextObj.Metric.Append(0, MapPoint.C_CONTAINER); // создать вторую точку 
+
             axMapScreen.BufferObjectNeed = true;
 
             MapFind.cMapSelect.SiteNumber = 1;
@@ -109,10 +138,23 @@ namespace GISdotNet.Map
             pntConvert.SetPoint(GeoX, GeoY);
             pntConvert.GetPoint(ref PlaneX, ref PlaneY);
 
+            dataGridView.AllowUserToAddRows = false;
+
             DataChannel = Channel.CreateUnbounded<byte[]>();
             work = UpdateWindowAsync;
             DataProducer = new Producer<byte[]>(DataChannel.Writer);
             DataConsumer = new Consumer<byte[]>(DataChannel.Reader, work);
+
+            DTable = new DataTable();
+            SBind = new BindingSource();
+            SBind.DataSource = DTable;
+            dataGridView.Columns.Clear();
+            dataGridView.DataSource = SBind;
+
+            context = SynchronizationContext.Current;
+
+            //DataTableReader reader = new DataTableReader(GetCustomers());
+            //DTable.Load(reader);
 
             Task.Run(async () =>
             {
@@ -137,6 +179,7 @@ namespace GISdotNet.Map
             {
                 await DataConsumer.ConsumeData();
             });
+                       
         }
 
         public async Task UpdateWindowAsync(byte[] packet)
@@ -147,7 +190,8 @@ namespace GISdotNet.Map
                 case 246:
                     byte[] targets = packet.Skip(1).ToArray();
                     var targetsData = PacketReader.ReadTargets(targets);
-                    UpdateTargets(targetsData);
+                    UpdateTargets(targetsData);        
+                    UpdateTable(targetsData);
                     break;
                 case 241:
                     byte[] azmth = packet.Skip(1).ToArray();
@@ -170,11 +214,53 @@ namespace GISdotNet.Map
           
         }
 
+        public void UpdateTable(List<Target> targets)
+        {
+            if (targets.Count == 0)
+            {
+                return;
+            }
+            DataTableReader reader = new DataTableReader(GetTableData(targets));
+          
+            context.Post(UpdateUI, reader);           
+        }
+
+        public void UpdateUI(object state)
+        {
+            var reader = state as DataTableReader;            
+            DTable.Load(reader, LoadOption.Upsert);          
+        }
+
+        public DataTable GetTableData(List<Target> targets)
+        {
+            DataTable table = new DataTable();
+
+            DataColumn NTargetColumn = table.Columns.Add("N Target", typeof(int));
+            table.Columns.Add("R", typeof(int));
+            table.Columns.Add("A", typeof(int));
+            table.Columns.Add("H", typeof(int));
+            table.Columns.Add("V", typeof(int));
+
+            table.PrimaryKey = new DataColumn[] { NTargetColumn };
+
+            foreach (Target target in targets)
+            {
+                table.Rows.Add(new object[] { target.TargetNumber,  target.X, target.Y, target.Vx, target.Vy });
+            }
+            table.AcceptChanges();        
+            return table;
+
+        }
+
+
+
         public void UpdateTargets(List<Target> targets)
         {
             double coordsX;
             double coordsY;
             double angle;
+            int ratio;
+
             axMapScreen.ClearObjects(0);
             MapPoint.PlaceInp = axGisToolKit.TxPPLACE.PP_PLANE;
             foreach (Target target in targets)
@@ -189,25 +275,38 @@ namespace GISdotNet.Map
                     //Black
                     MobilObj.Semantic.AddWithValueAsInteger(ColorSemCode,  0);
                     VectorObj.Semantic.AddWithValueAsInteger(ColorSemCode, 0);
-                }                
-                
+                }
+
+                //Подпись
+                MobilObj.Semantic.AddWithValue(SignSemCode, target.TargetNumber.ToString());
+                //MobilObj.Semantic.AddWithValue(SignSemCodeLeft, "Target");
+
+
+                ratio = Utils.CalculateVectorRatio(axMapScreen.ViewScale);
+
                 coordsX = PlaneX +  ((double)target.X * 10);
                 coordsY = PlaneY +  ((double)target.Y * 10); 
                 MapPoint.SetPoint(coordsX, coordsY);
                 MobilObj.Metric.Update(0, 1, MapPoint.C_CONTAINER);               
                 MobilObj.PaintObjectUp();  // нарисуем объект в буфер
 
-                VectorObj.Metric.Update(0, 1, MapPoint.C_CONTAINER);
-                MapPoint.SetPoint(coordsX + Utils.GetVectorLength(target.Vx, target.Vy) * 100, coordsY);
+                VectorObj.Metric.Update(0, 1, MapPoint.C_CONTAINER);              
+                MapPoint.SetPoint(coordsX + Utils.GetVectorLength(target.Vx, target.Vy) * ratio, coordsY);
                 VectorObj.Metric.Update(0, 2, MapPoint.C_CONTAINER);
                 angle = - Utils.CalculateVectorAngle(target.Vx, target.Vy);
                 VectorObj.RotateObject_EP(ref coordsX, ref coordsY, ref angle);              
                 VectorObj.PaintObjectUp(); // нарисуем объект в буфер
-                                          
+                Console.WriteLine(Utils.GetVectorLength(target.Vx, target.Vy));                          
                 
             }
             axMapScreen.RepaintWindow();
         }
+
+       /* public void UpdateTable(Target trg)
+        {
+            dataGridView.Rows.Add();
+            dataGridView["TargetNumber", 1].Value = trg.TargetNumber;
+        }*/
 
         public void PaintNewRlsOnMap(StandingPoint sp)
         {
@@ -400,7 +499,6 @@ namespace GISdotNet.Map
             slMap1.Text = "Масштаб: " + axMapScreen.ViewScale.ToString();
             slMap2.Text = "  X=  " + e.x.ToString();
             slMap3.Text = "  Y= " + e.y.ToString();
-
-        }       
+        }
     }
 }

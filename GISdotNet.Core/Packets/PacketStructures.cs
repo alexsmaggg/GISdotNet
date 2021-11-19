@@ -23,7 +23,7 @@ namespace GISdotNet.Core.Packets
 
       
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public struct Target                     // Пакет с целью 45 byte. 
+    public struct Target                  // Пакет с целью 45 byte. 
     {
         public ushort TargetNumber;          // Номер цели
         public int    X;                     // Координаты цели
@@ -51,6 +51,8 @@ namespace GISdotNet.Core.Packets
 
         public short  MetricCode;             // Код марки цели   02.07.2015
         public short  Overload;               // Перегрузка на звене трассы в ед.g (для самолета)
+
+      
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]

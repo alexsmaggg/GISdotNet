@@ -43,5 +43,39 @@ namespace GISdotNet.Map
             return angle;
         }
 
+        public static int CalculateVectorRatio( int scale)
+        {
+            if(scale > 1_000_000)
+            {
+                return 200;
+            }
+
+            if (scale > 500_000) {
+                return 100;
+            }
+
+            if (scale > 250_000)
+            {
+                return 50;
+            }
+
+            if (scale > 150_000)
+            {
+                return 20;
+            }
+
+            if (scale > 100_000)
+            {
+                return 10;
+            }
+
+            if (scale > 20_000)
+            {
+                return 5;
+            }
+
+            return 1;
+        }
+
     }
 }

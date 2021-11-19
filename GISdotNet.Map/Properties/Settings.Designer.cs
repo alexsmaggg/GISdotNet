@@ -8,7 +8,7 @@
 // </auto-generated>
 //------------------------------------------------------------------------------
 
-namespace MapApp.Map.Properties {
+namespace Map.Properties {
     
     
     [global::System.Runtime.CompilerServices.CompilerGeneratedAttribute()]
