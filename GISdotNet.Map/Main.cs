@@ -1,6 +1,7 @@
 ﻿using System;
 using System.IO;
 using System.Collections;
+using System.Drawing;
 using System.Collections.Generic;
 using System.Windows.Forms;
 using System.Threading;
@@ -13,8 +14,8 @@ using System.Linq;
 using GISdotNet.Core.Channels;
 using GISdotNet.Core.Packets;
 using GISdotNet.Core.Net;
+using System.ComponentModel;
 
-using FastMember;
 
 namespace GISdotNet.Map
 {
@@ -50,10 +51,9 @@ namespace GISdotNet.Map
         Producer<byte[]> DataProducer; 
         Consumer<byte[]> DataConsumer;
 
+        private BindingSource TargetInfoBindingSource;        
         DataTable DTable;
-        BindingSource SBind;
         SynchronizationContext context;
-
 
         public enum RlsColor: uint
         {
@@ -65,16 +65,7 @@ namespace GISdotNet.Map
 
         MapApi.DOUBLEPOINT center = new MapApi.DOUBLEPOINT();
         MapApi.DOUBLEPOINT point1 = new MapApi.DOUBLEPOINT();
-
-        public class ObjectReaderType
-        {
-            public int NTarget { get; set; }
-            public int R { get; set; }
-            public int A { get; set; }
-            public int H { get; set; }
-            public int V { get; set; }
-        }
-
+  
         public frmMain()
         {
             InitializeComponent();
@@ -145,16 +136,24 @@ namespace GISdotNet.Map
             DataProducer = new Producer<byte[]>(DataChannel.Writer);
             DataConsumer = new Consumer<byte[]>(DataChannel.Reader, work);
 
-            DTable = new DataTable();
-            SBind = new BindingSource();
-            SBind.DataSource = DTable;
-            dataGridView.Columns.Clear();
-            dataGridView.DataSource = SBind;
+
+            /*targetInfoList = new BindingList<TargetInfo>();
+            TargetInfoBindingSource.DataSource = targetInfoList;
+            dataGridView.DataSource = TargetInfoBindingSource;*/
 
             context = SynchronizationContext.Current;
 
-            //DataTableReader reader = new DataTableReader(GetCustomers());
+            DTable = InitTable();
+            TargetInfoBindingSource = new BindingSource();
+            TargetInfoBindingSource.DataSource = DTable;
+            dataGridView.Columns.Clear();
+            dataGridView.DataSource = TargetInfoBindingSource;
+
+
+
+            //DataTableReader reader = new DataTableReader(GetTableDataTest());
             //DTable.Load(reader);
+
 
             Task.Run(async () =>
             {
@@ -190,8 +189,9 @@ namespace GISdotNet.Map
                 case 246:
                     byte[] targets = packet.Skip(1).ToArray();
                     var targetsData = PacketReader.ReadTargets(targets);
-                    UpdateTargets(targetsData);        
-                    UpdateTable(targetsData);
+                    UpdateTargets(targetsData);
+                    //UpdateTable(targetsData);
+                    context.Post(UpdateTable, targetsData);
                     break;
                 case 241:
                     byte[] azmth = packet.Skip(1).ToArray();
@@ -214,45 +214,211 @@ namespace GISdotNet.Map
           
         }
 
-        public void UpdateTable(List<Target> targets)
+
+        public void UpdateTable(object state)
         {
-            if (targets.Count == 0)
+            var targets = state as List<Target>;
+
+            if (targets == null)
             {
                 return;
             }
-            DataTableReader reader = new DataTableReader(GetTableData(targets));
-          
-            context.Post(UpdateUI, reader);           
-        }
 
-        public void UpdateUI(object state)
-        {
-            var reader = state as DataTableReader;            
-            DTable.Load(reader, LoadOption.Upsert);          
-        }
+            if (DTable.Rows.Count == 0)
+            {
+                UpdateUI(targets);
+                return;
 
-        public DataTable GetTableData(List<Target> targets)
-        {
-            DataTable table = new DataTable();
+            }
 
-            DataColumn NTargetColumn = table.Columns.Add("N Target", typeof(int));
-            table.Columns.Add("R", typeof(int));
-            table.Columns.Add("A", typeof(int));
-            table.Columns.Add("H", typeof(int));
-            table.Columns.Add("V", typeof(int));
-
-            table.PrimaryKey = new DataColumn[] { NTargetColumn };
+            DataRowCollection rows = DTable.Rows;
+            List<Target> addTargetList = new List<Target>();
 
             foreach (Target target in targets)
             {
-                table.Rows.Add(new object[] { target.TargetNumber,  target.X, target.Y, target.Vx, target.Vy });
-            }
-            table.AcceptChanges();        
-            return table;
+                DataGridViewRow row;
+                //row = dataGridView.Rows[index];
+                //row.DefaultCellStyle.BackColor = Color.Orange;
+                var targetInfoItem = rows.Cast<DataRow>().SingleOrDefault(t => (int)t["N Target"] == target.TargetNumber);
 
+                if (targetInfoItem == null)
+                {
+                    addTargetList.Add(target);
+                }
+                else
+                {
+                    int index = rows.IndexOf(targetInfoItem);
+                    row = dataGridView.Rows[index];
+
+                    if (target.AlienSign == 1)
+                    {
+                        row.DefaultCellStyle.BackColor = Color.Orange;
+                    }
+
+                        if ((int)DTable.Rows[index][1] != target.X)
+                    {
+                        DTable.Rows[index].SetField(1, target.X);                      
+                    }
+                    if ((int)DTable.Rows[index][2] != target.Y)
+                    {
+                        DTable.Rows[index].SetField(2, target.Y);
+                    }
+                    if ((int)DTable.Rows[index][3] != target.Vx)
+                    {
+                        DTable.Rows[index].SetField(3, target.Vx);
+                    }
+                    if ((int)DTable.Rows[index][4] != target.Vy)
+                    {
+                        DTable.Rows[index].SetField(4, target.Vy);
+                    }
+                    if ((int)DTable.Rows[index][5] != target.AlienSign)
+                    {
+                        DTable.Rows[index].SetField(5, target.AlienSign);
+                    }
+
+                }
+            }
+
+            if (addTargetList.Count != 0)
+            {
+                UpdateUI(addTargetList);
+            }
+
+            return;
+        }
+
+        private static DataTable InitTable()
+        {
+            // Create sample Customers table, in order
+            // to demonstrate the behavior of the DataTableReader.
+            DataTable table = new DataTable();
+
+            // Create two columns, ID and Name.
+            DataColumn NTargetColumn = table.Columns.Add("N Target", typeof(int));
+            
+            // Set the ID column as the primary key column.
+            table.PrimaryKey = new DataColumn[] { NTargetColumn };
+
+            table.Columns.Add("X", typeof(int));
+            table.Columns.Add("Y", typeof(int));
+            table.Columns.Add("Vx", typeof(int));
+            table.Columns.Add("Vy", typeof(int));
+            table.Columns.Add("Type", typeof(int));
+            table.AcceptChanges();
+            return table;
         }
 
 
+        public void UpdateUI( List<Target> targets)
+        {
+            
+            foreach (Target target in targets)
+            {
+                DTable.Rows.Add(new object[] { target.TargetNumber, target.X, target.Y, target.Vx, target.Vy, target.AlienSign });
+            }
+
+            return;
+        }
+
+        /*public void UpdateTable(object state)
+        {
+            var targets  = state as List<Target>;
+           
+
+            if (targetInfoList.Count == 0)
+            {
+                foreach (Target target in targets)
+                {
+                    targetInfoList.Add(new TargetInfo {Ntarget = target.TargetNumber, RA = target.X} );
+                }
+                
+                return;
+
+            }
+
+            
+            foreach (Target target in targets)
+            {
+                DataGridViewRow row;             
+                var targetInfoItem = targetInfoList.SingleOrDefault(t => t.Ntarget == target.TargetNumber);
+                
+                if (targetInfoItem == null)
+                {
+                    targetInfoList.Add(new TargetInfo { Ntarget = target.TargetNumber, RA = target.X });
+                } 
+                else
+                {
+                    int index = targetInfoList.IndexOf(targetInfoItem);
+                    row = dataGridView.Rows[index];
+                    if (target.X > 5000)
+                    {
+                        row.DefaultCellStyle.BackColor = Color.Orange;
+                    }               
+                    targetInfoList[index].RA = target.X;
+                }              
+            }
+
+        }*/
+
+        /*  public void UpdateTable(List<Target> targets)
+          {
+              if (targets.Count == 0)
+              {
+                  return;
+              }
+              DataTableReader reader = new DataTableReader(GetTableData(targets));
+
+              context.Post(UpdateUI, reader);           
+          }
+
+          public void UpdateUI(object state)
+          {
+              var reader = state as DataTableReader;            
+              DTable.Load(reader, LoadOption.Upsert);          
+          }
+
+          public DataTable GetTableData(List<Target> targets)
+          {
+              DataTable table = new DataTable();
+
+              DataColumn NTargetColumn = table.Columns.Add("N Target", typeof(int));
+              table.Columns.Add("R", typeof(int));
+              table.Columns.Add("A", typeof(int));
+              table.Columns.Add("H", typeof(int));
+              table.Columns.Add("V", typeof(int));
+              table.Columns.Add("Type", typeof(int));
+
+              table.PrimaryKey = new DataColumn[] { NTargetColumn };
+
+              foreach (Target target in targets)
+              {
+                  table.Rows.Add(new object[] { target.TargetNumber,  target.X, target.Y, target.Vx, target.Vy, target.AlienSign });
+              }
+              table.AcceptChanges();        
+              return table;
+
+          }
+
+          public DataTable GetTableDataTest()
+          {
+              DataTable table = new DataTable();
+
+              DataColumn NTargetColumn = table.Columns.Add("N Target", typeof(int));
+              table.Columns.Add("R", typeof(int));
+              table.Columns.Add("A", typeof(int));
+              table.Columns.Add("H", typeof(int));
+              table.Columns.Add("V", typeof(int));
+              table.Columns.Add("Type", typeof(int));
+
+              table.PrimaryKey = new DataColumn[] { NTargetColumn };
+
+              table.Rows.Add(new object[] { 0, 1, 2, 3, 4, 5});
+              table.Rows.Add(new object[] { 1, 1, 2, 3, 4, 5});
+              table.Rows.Add(new object[] { 2, 1, 2, 3, 4, 5});
+
+              table.AcceptChanges();
+              return table;
+          }*/
 
         public void UpdateTargets(List<Target> targets)
         {
@@ -296,18 +462,12 @@ namespace GISdotNet.Map
                 angle = - Utils.CalculateVectorAngle(target.Vx, target.Vy);
                 VectorObj.RotateObject_EP(ref coordsX, ref coordsY, ref angle);              
                 VectorObj.PaintObjectUp(); // нарисуем объект в буфер
-                Console.WriteLine(Utils.GetVectorLength(target.Vx, target.Vy));                          
+                //Console.WriteLine(Utils.GetVectorLength(target.Vx, target.Vy));                          
                 
             }
             axMapScreen.RepaintWindow();
         }
-
-       /* public void UpdateTable(Target trg)
-        {
-            dataGridView.Rows.Add();
-            dataGridView["TargetNumber", 1].Value = trg.TargetNumber;
-        }*/
-
+      
         public void PaintNewRlsOnMap(StandingPoint sp)
         {
             // Взять координаты в системе тренаженра 0 - КП и не рисовать на карте
@@ -448,6 +608,26 @@ namespace GISdotNet.Map
             MapFind.cMapSelect.MapSites[1] = true;           
         }
 
+        private void dataGridView_CellFormatting(object sender, DataGridViewCellFormattingEventArgs e)
+        {
+            /*// If the column is the Artist column, check the
+            // value.
+            if (this.dataGridView.Columns[e.ColumnIndex].Name == "Type")
+            {
+                if (e.Value != null)
+                {
+                    // Check for the string "pink" in the cell.
+                    int stringValue = (int)e.Value;
+                    DataGridViewRow row = this.dataGridView.Rows[e.RowIndex]; 
+                    if (stringValue == 1)
+                    { 
+                        row.DefaultCellStyle.BackColor = Color.Orange;
+                    }
+                    
+                }
+            }           */
+        }
+
         private void btnFileOpen_Click(object sender, EventArgs e)
         {
              OpenMapDialog.FileName = "";
@@ -499,6 +679,16 @@ namespace GISdotNet.Map
             slMap1.Text = "Масштаб: " + axMapScreen.ViewScale.ToString();
             slMap2.Text = "  X=  " + e.x.ToString();
             slMap3.Text = "  Y= " + e.y.ToString();
+        }
+
+        private void dataGridView_RowsAdded(object sender, DataGridViewRowsAddedEventArgs e)
+        {
+           
+        }
+
+        private void dataGridView_CellContentClick(object sender, DataGridViewCellEventArgs e)
+        {
+
         }
     }
 }
